@@ -1,15 +1,8 @@
-{
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "d1-blogs",
-      "database_id": "74607dcf-d430-4786-9d9e-c59a27a68d7f"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "jelvan-blogs-media"
-    }
-  ]
-}
+# wrangler.toml
+name = "jelvan-blogs"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "d1-blogs"
+database_id = "74607dcf-d430-4786-9d9e-c59a27a68d7f"
