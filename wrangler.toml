@@ -1,0 +1,4 @@
+[[d1_databases]]
+binding = "DB" # or your preferred name
+database_name = "blogs-jelvan"
+database_id = "0de1a493-152d-446d-a7da-646aeeaa855f"
