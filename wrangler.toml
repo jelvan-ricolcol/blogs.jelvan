@@ -2,8 +2,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "blogs-jelvan",
-      "database_id": "0de1a493-152d-446d-a7da-646aeeaa855f"
+      "database_name": "d1-blogs",
+      "database_id": "74607dcf-d430-4786-9d9e-c59a27a68d7f"
     }
   ],
   "r2_buckets": [
