@@ -1,4 +1,12 @@
+# wrangler.toml
+name = "jelvan-blogs"
+pages_build_output_dir = "dist"
+
 [[d1_databases]]
-binding = "DB" # or your preferred name
-database_name = "blogs-jelvan"
-database_id = "0de1a493-152d-446d-a7da-646aeeaa855f"
+binding = "DB"
+database_name = "jelvan-blogs-db"
+database_id = "PASTE_YOUR_COPIED_D1_DATABASE_ID_HERE"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "jelvan-blogs-media"
