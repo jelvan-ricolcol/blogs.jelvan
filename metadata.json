@@ -1,0 +1,6 @@
+{
+  "name": "Jelvan Blogs",
+  "description": "A premium, interactive personal timeline and private dashboard for documenting professional journeys, achievements, travel, and memories with full analytics, anonymous commenting, and moderation capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
