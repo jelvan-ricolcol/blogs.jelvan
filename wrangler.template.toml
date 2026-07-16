@@ -7,5 +7,7 @@ r2_buckets = [
   { binding = "R2_BUCKET", bucket_name = "__R2_BUCKET_NAME__" }
 ]
 
+durable_objects = { bindings = [ { name = "RATE_LIMIT_DO", class_name = "RateLimit" } ] }
+
 [env.production]
 name = "blogs-jelvan-assets"

@@ -35,4 +35,8 @@ jobs:
           CLOUDFARE_ZONE_ID: ${{ secrets.CLOUDFARE_ZONE_ID }}
           BACKEND_JWT_SECRET: ${{ secrets.BACKEND_JWT_SECRET }}
           CF_ACCESS_JWKS_URL: ${{ secrets.CF_ACCESS_JWKS_URL }}
+          RATE_LIMIT_UPLOADS: ${{ secrets.RATE_LIMIT_UPLOADS }}
+          RATE_LIMIT_PURGES: ${{ secrets.RATE_LIMIT_PURGES }}
+          RATE_LIMIT_WINDOW_SECONDS: ${{ secrets.RATE_LIMIT_WINDOW_SECONDS }}
+          PURGE_WHITELIST: ${{ secrets.PURGE_WHITELIST }}
         run: npx wrangler publish --config wrangler.toml --env production

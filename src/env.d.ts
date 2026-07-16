@@ -12,11 +12,26 @@ declare global {
     } | null>;
   }
 
+  interface DurableObjectNamespace {
+    idFromName(name: string): DurableObjectId;
+    get(id: DurableObjectId): DurableObjectStub;
+  }
+
+  interface DurableObjectId {
+    toString(): string;
+  }
+
+  interface DurableObjectStub {
+    fetch(request: Request): Promise<Response>;
+  }
+
   interface Env {
     R2_BUCKET: R2Bucket;
     CLOUDFARE_S3_ENDPOINT: string;
     CLOUDFARE_API_TOKEN: string;
     CLOUDFARE_ZONE_ID: string;
-    BACKEND_AUTH_TOKEN: string;
+    BACKEND_JWT_SECRET?: string;
+    CF_ACCESS_JWKS_URL?: string;
+    RATE_LIMIT_DO: DurableObjectNamespace;
   }
 }

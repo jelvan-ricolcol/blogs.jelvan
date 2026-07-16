@@ -13,36 +13,25 @@ Required repository secrets (exact names)
 - CLOUDFARE_ZONE_ID — Zone ID used for cache purge
 - BACKEND_JWT_SECRET — HS256 secret used to verify fallback JWTs (short-lived)
 - CF_ACCESS_JWKS_URL — (optional but recommended) JWKS URL for validating Cloudflare Access tokens
+- RATE_LIMIT_UPLOADS — (optional) uploads per window, default 60
+- RATE_LIMIT_PURGES — (optional) purges per window, default 10
+- RATE_LIMIT_WINDOW_SECONDS — (optional) window seconds, default 60
+- PURGE_WHITELIST — (optional) comma-separated allowed hostnames or hostname/path prefixes
 
 How it works
 
 - The GitHub Action reads the template wrangler.template.toml and substitutes CLOUDFARE_ACCOUNT_ID and R2_BUCKET into wrangler.toml at build time. It then runs `wrangler publish` using CF_API_TOKEN set from CLOUDFARE_API_TOKEN.
 - The Worker exposes three endpoints:
   - GET /health
-  - POST /upload (multipart/form-data, file field name `file`) — requires a valid Cloudflare Access token or a signed HS256 JWT
-  - POST /purge (JSON { files: [urls...] } or { purge_everything: true }) — requires auth
+  - POST /upload (multipart/form-data, file field name `file`) — requires a valid Cloudflare Access token or a signed HS256 JWT; rate limited per client
+  - POST /purge (JSON { files: [urls...] } or { purge_everything: true }) — requires auth and is rate-limited; files must match PURGE_WHITELIST unless purge_everything is true
 
 Authentication
 
-Preferred: Protect the Worker route with Cloudflare Access and set CF_ACCESS_JWKS_URL secret so the Worker can verify access tokens. This prevents header forgery.
+- Preferred: Protect the Worker route with Cloudflare Access and set CF_ACCESS_JWKS_URL secret so the Worker can verify access tokens.
+- Fallback: Use HS256 JWTs signed with BACKEND_JWT_SECRET.
 
-Fallback: Use HS256 JWTs signed with BACKEND_JWT_SECRET. Generate short-lived tokens server-side and store the secret securely as a GitHub repo secret.
+Durable Objects & Rate Limiting
 
-How to add the secrets
-
-Via GitHub UI:
-1. Go to your repository -> Settings -> Secrets and variables -> Actions -> New repository secret
-2. Add each secret with the exact name listed above.
-
-Via gh CLI:
-- gh secret set BACKEND_JWT_SECRET --body "<your-secret>"
-- gh secret set CF_ACCESS_JWKS_URL --body "https://<your-team>.cloudflareaccess.com/cdn-cgi/access/certs"
-
-Local dev / testing
-- Install deps: npm ci
-- Build: npm run build
-- Render wrangler.toml locally:
-  sed "s/__CLOUDFARE_ACCOUNT_ID__/your-account-id/g; s/__R2_BUCKET_NAME__/your-r2-bucket/g" wrangler.template.toml > wrangler.toml
-- Run locally:
-  npx wrangler dev --local
+- A Durable Object 'RateLimit' is used to track usage counters per client key. Ensure your account supports Durable Objects (Workers Unlimited or paid plan may be required for heavy usage).
 

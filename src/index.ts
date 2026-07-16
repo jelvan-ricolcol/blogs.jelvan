@@ -1,5 +1,7 @@
 // Cloudflare Worker for R2 uploads and Cloudflare Cache purge
-// Enhanced auth: validates Cloudflare Access JWT (RS256 via JWKS) OR short-lived HS256 JWTs signed with BACKEND_JWT_SECRET
+// Enhanced auth + rate limiting and purge whitelist
+
+import { RateLimit } from './rate_limit_do';
 
 export interface Env {
   R2_BUCKET: R2Bucket;
@@ -8,6 +10,7 @@ export interface Env {
   CLOUDFARE_ZONE_ID: string;
   BACKEND_JWT_SECRET?: string;
   CF_ACCESS_JWKS_URL?: string;
+  RATE_LIMIT_DO: DurableObjectNamespace;
 }
 
 function jsonResponse(body: any, status = 200) {
@@ -31,7 +34,6 @@ async function fetchJwks(url: string) {
 }
 
 function base64UrlDecode(input: string) {
-  // Pad string
   input = input.replace(/-/g, '+').replace(/_/g, '/');
   const pad = input.length % 4;
   if (pad === 2) input += '==';
@@ -60,9 +62,6 @@ async function verifyHs256(token: string, secret: string) {
 }
 
 async function importJwkToCryptoKey(jwk: any) {
-  // Directly import JWK using subtle.importKey
-  // Ensure usage matches
-  const alg = jwk.alg || 'RS256';
   const key = await crypto.subtle.importKey(
     'jwk',
     jwk,
@@ -85,7 +84,6 @@ async function verifyRs256(token: string, jwksUrl: string) {
   const keyEntry = (jwks.keys || []).find((k: any) => k.kid === kid);
   if (!keyEntry) throw new Error('No matching JWK for kid');
 
-  // import JWK and verify
   const cryptoKey = await importJwkToCryptoKey(keyEntry);
   const signingInput = utf8ToUint8Array(`${headerB64}.${payloadB64}`);
   const signature = new Uint8Array(base64UrlDecode(signatureB64));
@@ -94,7 +92,6 @@ async function verifyRs256(token: string, jwksUrl: string) {
 }
 
 async function validateJwtAndClaims(token: string, env: Env) {
-  // Parse payload to validate exp claim
   const parts = token.split('.');
   if (parts.length !== 3) return false;
   const payload = JSON.parse(new TextDecoder().decode(new Uint8Array(base64UrlDecode(parts[1]))));
@@ -103,7 +100,6 @@ async function validateJwtAndClaims(token: string, env: Env) {
   if (payload.exp && now > payload.exp) return false;
   if (payload.nbf && now < payload.nbf) return false;
 
-  // Verify signature
   const alg = JSON.parse(new TextDecoder().decode(new Uint8Array(base64UrlDecode(parts[0])))).alg;
   if (alg === 'HS256') {
     if (!env.BACKEND_JWT_SECRET) throw new Error('BACKEND_JWT_SECRET not configured');
@@ -111,68 +107,105 @@ async function validateJwtAndClaims(token: string, env: Env) {
   }
   if (alg === 'RS256') {
     if (!env.CF_ACCESS_JWKS_URL) {
-      // No JWKS URL configured, cannot verify signature. Reject by default for RS256 when JWKS absent.
       throw new Error('RS256 token received but CF_ACCESS_JWKS_URL is not configured');
     }
     return await verifyRs256(token, env.CF_ACCESS_JWKS_URL);
   }
-  // unsupported alg
   throw new Error('Unsupported JWT alg');
 }
 
 async function requireAuth(req: Request, env: Env) {
-  // Priority: Cloudflare Access header Cf-Access-Jwt-Assertion
   const accessJwt = req.headers.get('Cf-Access-Jwt-Assertion') || req.headers.get('cf-access-jwt-assertion');
   if (accessJwt) {
     try {
       if (env.CF_ACCESS_JWKS_URL) {
         const ok = await validateJwtAndClaims(accessJwt, env);
-        return ok;
+        return ok ? { ok: true, sub: JSON.parse(new TextDecoder().decode(new Uint8Array(base64UrlDecode(accessJwt.split('.')[1])))).sub } : { ok: false };
       }
-      // No JWKS URL configured: rely on Cloudflare Access enforcement (header is only set when Access is enforced)
-      // Still validate exp/nbf claims without signature
       const parts = accessJwt.split('.');
-      if (parts.length !== 3) return false;
+      if (parts.length !== 3) return { ok: false };
       const payload = JSON.parse(new TextDecoder().decode(new Uint8Array(base64UrlDecode(parts[1]))));
       const now = Math.floor(Date.now() / 1000);
-      if (payload.exp && now > payload.exp) return false;
-      if (payload.nbf && now < payload.nbf) return false;
-      return true;
+      if (payload.exp && now > payload.exp) return { ok: false };
+      if (payload.nbf && now < payload.nbf) return { ok: false };
+      return { ok: true, sub: payload.sub };
     } catch (e) {
       console.error('Access JWT validation failed', String(e));
-      return false;
+      return { ok: false };
     }
   }
 
-  // Fallback: Authorization: Bearer <JWT>
   const auth = req.headers.get('authorization') || '';
   const bearer = auth.replace(/^Bearer\s+/i, '');
   if (bearer) {
     try {
       const ok = await validateJwtAndClaims(bearer, env);
-      return ok;
+      if (!ok) return { ok: false };
+      const payload = JSON.parse(new TextDecoder().decode(new Uint8Array(base64UrlDecode(bearer.split('.')[1]))));
+      return { ok: true, sub: payload.sub };
     } catch (e) {
       console.error('Bearer JWT validation failed', String(e));
-      return false;
+      return { ok: false };
     }
   }
 
-  return false;
+  return { ok: false };
+}
+
+async function checkRateLimit(key: string, limit: number, windowSec: number, env: Env) {
+  // Use Durable Object namespace
+  const id = env.RATE_LIMIT_DO.idFromName(key);
+  const obj = env.RATE_LIMIT_DO.get(id);
+  const res = await obj.fetch('https://rate-limit.do/incr', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'incr', key, limit, window: windowSec }),
+  });
+  const data = await res.json();
+  return data; // { allowed, remaining, used, reset }
+}
+
+function getClientKey(authSub: string | null, request: Request) {
+  if (authSub) return `sub:${authSub}`;
+  const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
+  return `ip:${ip}`;
+}
+
+function isPurgeUrlAllowed(urlStr: string, whitelist: string[] | null) {
+  try {
+    const u = new URL(urlStr);
+    if (!whitelist || whitelist.length === 0) return false; // default deny
+    return whitelist.some(pattern => {
+      // pattern can be hostname or hostname/pathprefix
+      if (pattern.includes('/')) {
+        // treat as prefix after hostname: e.g. example.com/uploads/
+        return urlStr.startsWith(pattern) || `${u.hostname}${u.pathname}`.startsWith(pattern.replace(/^https?:\/\//, ''));
+      }
+      return u.hostname === pattern || u.hostname.endsWith(`.${pattern}`);
+    });
+  } catch (e) {
+    return false;
+  }
 }
 
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
 
-    // Health check
     if (url.pathname === '/health' && request.method === 'GET') {
       return jsonResponse({ ok: true, timestamp: Date.now() });
     }
 
-    // Upload endpoint
     if (url.pathname === '/upload' && request.method === 'POST') {
-      const authorized = await requireAuth(request, env);
-      if (!authorized) return new Response('Unauthorized', { status: 401 });
+      const auth = await requireAuth(request, env);
+      if (!auth.ok) return new Response('Unauthorized', { status: 401 });
+
+      // rate limit
+      const uploadLimit = Number(env['RATE_LIMIT_UPLOADS'] || 60);
+      const windowSec = Number(env['RATE_LIMIT_WINDOW_SECONDS'] || 60);
+      const key = getClientKey(auth.sub || null, request);
+      const rl = await checkRateLimit(`upload:${key}`, uploadLimit, windowSec, env);
+      if (!rl.allowed) return jsonResponse({ error: 'Rate limit exceeded', details: rl }, 429);
 
       const contentType = request.headers.get('content-type') || '';
       if (!contentType.includes('multipart/form-data') && !contentType.includes('form-data')) {
@@ -184,28 +217,34 @@ export default {
       if (!file) return jsonResponse({ error: 'Missing file field' }, 400);
 
       const filename = (file as File).name || 'upload.bin';
-      const key = `uploads/${Date.now()}-${crypto.randomUUID()}-${filename}`;
+      const keyName = `uploads/${Date.now()}-${crypto.randomUUID()}-${filename}`;
 
       const arrayBuffer = await (file as File).arrayBuffer();
 
       try {
-        await env.R2_BUCKET.put(key, arrayBuffer, {
+        await env.R2_BUCKET.put(keyName, arrayBuffer, {
           httpMetadata: { contentType: (file as File).type || 'application/octet-stream' },
         });
 
         const baseEndpoint = (env.CLOUDFARE_S3_ENDPOINT || '').replace(/\/$/, '');
-        const publicUrl = baseEndpoint ? `${baseEndpoint}/${key}` : null;
+        const publicUrl = baseEndpoint ? `${baseEndpoint}/${keyName}` : null;
 
-        return jsonResponse({ key, url: publicUrl });
+        return jsonResponse({ key: keyName, url: publicUrl });
       } catch (err) {
         return jsonResponse({ error: 'Upload failed', details: String(err) }, 500);
       }
     }
 
-    // Purge cache endpoint
     if (url.pathname === '/purge' && request.method === 'POST') {
-      const authorized = await requireAuth(request, env);
-      if (!authorized) return new Response('Unauthorized', { status: 401 });
+      const auth = await requireAuth(request, env);
+      if (!auth.ok) return new Response('Unauthorized', { status: 401 });
+
+      // rate limit for purge
+      const purgeLimit = Number(env['RATE_LIMIT_PURGES'] || 10);
+      const windowSec = Number(env['RATE_LIMIT_WINDOW_SECONDS'] || 60);
+      const key = getClientKey(auth.sub || null, request);
+      const rl = await checkRateLimit(`purge:${key}`, purgeLimit, windowSec, env);
+      if (!rl.allowed) return jsonResponse({ error: 'Rate limit exceeded', details: rl }, 429);
 
       if (!env.CLOUDFARE_API_TOKEN) return jsonResponse({ error: 'CLOUDFARE_API_TOKEN not configured' }, 500);
       if (!env.CLOUDFARE_ZONE_ID) return jsonResponse({ error: 'CLOUDFARE_ZONE_ID not configured' }, 500);
@@ -220,12 +259,19 @@ export default {
       const purgeEverything = !!body.purge_everything;
       const files = Array.isArray(body.files) ? body.files : undefined;
 
+      const whitelistRaw = env['PURGE_WHITELIST'] || '';
+      const whitelist = whitelistRaw ? whitelistRaw.split(',').map(s => s.trim()).filter(Boolean) : null;
+
+      if (!purgeEverything) {
+        if (!files || files.length === 0) return jsonResponse({ error: 'Provide files array or set purge_everything to true' }, 400);
+        // Validate each file against whitelist
+        for (const f of files) {
+          if (!isPurgeUrlAllowed(f, whitelist)) return jsonResponse({ error: 'Purge URL not allowed', url: f }, 403);
+        }
+      }
+
       const purgeUrl = `https://api.cloudflare.com/client/v4/zones/${env.CLOUDFARE_ZONE_ID}/purge_cache`;
       const payload = purgeEverything ? { purge_everything: true } : { files };
-
-      if (!purgeEverything && (!files || files.length === 0)) {
-        return jsonResponse({ error: 'Provide files array or set purge_everything to true' }, 400);
-      }
 
       try {
         const resp = await fetch(purgeUrl, {
