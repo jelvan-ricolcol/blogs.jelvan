@@ -33,5 +33,6 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
           CLOUDFARE_S3_ENDPOINT: ${{ secrets.CLOUDFARE_S3_ENDPOINT }}
           CLOUDFARE_ZONE_ID: ${{ secrets.CLOUDFARE_ZONE_ID }}
-          BACKEND_AUTH_TOKEN: ${{ secrets.BACKEND_AUTH_TOKEN }}
+          BACKEND_JWT_SECRET: ${{ secrets.BACKEND_JWT_SECRET }}
+          CF_ACCESS_JWKS_URL: ${{ secrets.CF_ACCESS_JWKS_URL }}
         run: npx wrangler publish --config wrangler.toml --env production
