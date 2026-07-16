@@ -1,0 +1,37 @@
+name: Deploy Cloudflare Worker
+
+on:
+  push:
+    branches: [ backend/cloudfare-r2 ]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Render wrangler.toml from template
+        run: |
+          sed "s/__CLOUDFARE_ACCOUNT_ID__/${{ secrets.CLOUDFARE_ACCOUNT_ID }}/g; s/__R2_BUCKET_NAME__/${{ secrets.R2_BUCKET }}/g" wrangler.template.toml > wrangler.toml
+        shell: bash
+
+      - name: Publish to Cloudflare
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFARE_API_TOKEN }}
+          CLOUDFARE_S3_ENDPOINT: ${{ secrets.CLOUDFARE_S3_ENDPOINT }}
+          CLOUDFARE_ZONE_ID: ${{ secrets.CLOUDFARE_ZONE_ID }}
+          BACKEND_AUTH_TOKEN: ${{ secrets.BACKEND_AUTH_TOKEN }}
+        run: npx wrangler publish --config wrangler.toml --env production

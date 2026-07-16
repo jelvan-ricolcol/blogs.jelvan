@@ -1,0 +1,11 @@
+name = "blogs-jelvan-assets"
+main = "dist/index.js"
+compatibility_date = "2026-07-16"
+account_id = "__CLOUDFARE_ACCOUNT_ID__"
+
+r2_buckets = [
+  { binding = "R2_BUCKET", bucket_name = "__R2_BUCKET_NAME__" }
+]
+
+[env.production]
+name = "blogs-jelvan-assets"
