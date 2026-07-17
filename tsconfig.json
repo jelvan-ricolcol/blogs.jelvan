@@ -14,5 +14,5 @@
     "types": ["vite/client", "@cloudflare/workers-types"]
   },
   "include": ["src/**/*", "functions/**/*.ts"],
-  "exclude": ["src/token_audit_do.ts"]
+  "exclude": []
 }
