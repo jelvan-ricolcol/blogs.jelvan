@@ -91,7 +91,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       url: toPublicUrl(fileKey, context.env)
     });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to upload file" }, 500);
+    console.error("Error uploading file:", err);
+    return json({ error: "Failed to upload file" }, 500);
   }
 };
 
@@ -111,7 +112,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     return json({ success: true, files, total: files.length });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to list files" }, 500);
+    console.error("Error listing files:", err);
+    return json({ error: "Failed to list files" }, 500);
   }
 };
 
@@ -129,6 +131,7 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
     await context.env.MEDIA_BUCKET.delete(key);
     return json({ success: true });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to delete file" }, 500);
+    console.error("Error deleting file:", err);
+    return json({ error: "Failed to delete file" }, 500);
   }
 };

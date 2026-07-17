@@ -67,7 +67,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     if (postId) {
       const post = await context.env.DB.prepare("SELECT * FROM posts WHERE id = ?")
-        .bind(postId)
+        .bind(String(postId))
         .first<Record<string, any>>();
       if (!post) {
         return json({ error: "Post not found" }, 404);
@@ -75,13 +75,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       return json(normalizePost(post));
     }
 
+    const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "50"), 1), 100);
+    const offset = (page - 1) * limit;
+
     const { results } = await context.env.DB.prepare(
-      "SELECT * FROM posts ORDER BY isPinned DESC, date DESC"
-    ).all<Record<string, any>>();
+      "SELECT * FROM posts ORDER BY isPinned DESC, date DESC LIMIT ? OFFSET ?"
+    ).bind(limit, offset).all<Record<string, any>>();
 
     return json((results || []).map(normalizePost));
   } catch (err: any) {
-    return json({ error: err.message || "Failed to fetch posts" }, 500);
+    console.error("Error fetching posts:", err);
+    return json({ error: "Failed to fetch posts" }, 500);
   }
 };
 
@@ -102,22 +107,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .bind(
-        data.id,
-        data.title,
-        data.category,
-        data.content,
-        data.date,
+        String(data.id),
+        String(data.title),
+        String(data.category),
+        String(data.content),
+        String(data.date),
         JSON.stringify(Array.isArray(data.media) ? data.media : []),
         Number(data.likes || 0),
         Number(data.views || 0),
         data.isPinned ? 1 : 0,
-        data.deviceSignature || ""
+        String(data.deviceSignature || "")
       )
       .run();
 
     return json({ success: true });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to save post" }, 500);
+    console.error("Error saving post:", err);
+    return json({ error: "Failed to save post" }, 500);
   }
 };
 
@@ -133,7 +139,7 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
     }
 
     const result = await context.env.DB.prepare("DELETE FROM posts WHERE id = ?")
-      .bind(postId)
+      .bind(String(postId))
       .run();
 
     if (!result.success) {
@@ -142,6 +148,7 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
 
     return json({ success: true });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to delete post" }, 500);
+    console.error("Error deleting post:", err);
+    return json({ error: "Failed to delete post" }, 500);
   }
 };

@@ -18,7 +18,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         await context.env.DB.prepare("SELECT 1 as ok").first();
         services.database = { status: "ok" };
       } catch (err: any) {
-        services.database = { status: "error", error: err.message || "Database check failed" };
+        console.error("Database health check failed:", err);
+        services.database = { status: "error", error: "Database check failed" };
         overall = "degraded";
       }
     }
@@ -28,7 +29,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
         await context.env.MEDIA_BUCKET.list({ limit: 1 });
         services.mediaBucket = { status: "ok" };
       } catch (err: any) {
-        services.mediaBucket = { status: "error", error: err.message || "R2 check failed" };
+        console.error("R2 health check failed:", err);
+        services.mediaBucket = { status: "error", error: "R2 check failed" };
         overall = "degraded";
       }
     }
@@ -42,11 +44,12 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
     );
   } catch (err: any) {
+    console.error("Overall health check failed:", err);
     return new Response(
       JSON.stringify({
         status: "unhealthy",
         timestamp: new Date().toISOString(),
-        error: err.message || "Health check failed",
+        error: "Health check failed",
         services
       }),
       { status: 500, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
