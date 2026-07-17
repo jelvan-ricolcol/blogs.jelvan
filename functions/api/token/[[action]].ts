@@ -100,6 +100,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     return json({ error: 'Not found' }, 404);
   } catch (err: any) {
-    return json({ error: err.message || "Failed to process token audit" }, 500);
+    console.error("Error processing token action:", err);
+    return json({ error: "Failed to process token audit" }, 500);
   }
 };

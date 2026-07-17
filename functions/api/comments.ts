@@ -68,7 +68,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     if (postId) {
       where.push("postId = ?");
-      bindings.push(postId);
+      bindings.push(String(postId));
     }
     if (!(includePending && isAdmin)) {
       where.push("isApproved = 1");
@@ -93,7 +93,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       total: Number(countRow?.total || 0)
     });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to fetch comments" }, 500);
+    console.error("Error fetching comments:", err);
+    return json({ error: "Failed to fetch comments" }, 500);
   }
 };
 
@@ -104,29 +105,37 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return json({ error: "Missing required fields" }, 400);
     }
 
+    const isAdmin = isAuthorized(context.request, context.env);
+    
+    // Only admins can set these fields directly during creation
+    const isPinned = isAdmin && comment.isPinned ? 1 : 0;
+    const isApproved = isAdmin && comment.isApproved ? 1 : 0;
+    const isReported = comment.isReported ? 1 : 0; // users might report it? usually default 0
+
     await context.env.DB.prepare(`
       INSERT INTO comments (
         id, postId, author, avatarSeed, text, date, isPinned, isApproved, isReported, parentId, deviceSignature
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .bind(
-        comment.id,
-        comment.postId,
-        comment.author,
-        comment.avatarSeed || "",
-        comment.text,
-        comment.date || new Date().toISOString(),
-        comment.isPinned ? 1 : 0,
-        comment.isApproved ? 1 : 0,
-        comment.isReported ? 1 : 0,
-        comment.parentId ?? null,
-        comment.deviceSignature || ""
+        String(comment.id),
+        String(comment.postId),
+        String(comment.author),
+        String(comment.avatarSeed || ""),
+        String(comment.text),
+        String(comment.date || new Date().toISOString()),
+        isPinned,
+        isApproved,
+        isReported,
+        comment.parentId ? String(comment.parentId) : null,
+        String(comment.deviceSignature || "")
       )
       .run();
 
     return json({ success: true });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to submit comment" }, 500);
+    console.error("Error submitting comment:", err);
+    return json({ error: "Failed to submit comment" }, 500);
   }
 };
 
@@ -151,13 +160,14 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
         updates.isApproved ? 1 : 0,
         updates.isPinned ? 1 : 0,
         updates.isReported ? 1 : 0,
-        id
+        String(id)
       )
       .run();
 
     return json({ success: true });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to update comment" }, 500);
+    console.error("Error updating comment:", err);
+    return json({ error: "Failed to update comment" }, 500);
   }
 };
 
@@ -172,9 +182,10 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
       return json({ error: "Missing id query parameter" }, 400);
     }
 
-    await context.env.DB.prepare("DELETE FROM comments WHERE id = ?").bind(id).run();
+    await context.env.DB.prepare("DELETE FROM comments WHERE id = ?").bind(String(id)).run();
     return json({ success: true });
   } catch (err: any) {
-    return json({ error: err.message || "Failed to delete comment" }, 500);
+    console.error("Error deleting comment:", err);
+    return json({ error: "Failed to delete comment" }, 500);
   }
 };

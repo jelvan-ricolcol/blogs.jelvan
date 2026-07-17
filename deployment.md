@@ -291,22 +291,24 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 // POST /api/comments - Submit comment or reply
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const comment: any = await context.request.json();
+  const authHeader = context.request.headers.get("Authorization");
+  const isAdmin = authHeader === context.env.VITE_ADMIN_PASSWORD;
   
   await context.env.DB.prepare(`
     INSERT INTO comments (id, postId, author, avatarSeed, text, date, isPinned, isApproved, isReported, parentId, deviceSignature)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    comment.id,
-    comment.postId,
-    comment.author,
-    comment.avatarSeed,
-    comment.text,
-    comment.date,
-    comment.isPinned ? 1 : 0,
-    comment.isApproved ? 1 : 0, // Admin dashboard config will decide auto-approval rules
+    String(comment.id),
+    String(comment.postId),
+    String(comment.author),
+    String(comment.avatarSeed || ""),
+    String(comment.text),
+    String(comment.date || new Date().toISOString()),
+    isAdmin && comment.isPinned ? 1 : 0,
+    isAdmin && comment.isApproved ? 1 : 0, // Enforce admin-only direct approval/pinning
     0,
-    comment.parentId || null,
-    comment.deviceSignature || ""
+    comment.parentId ? String(comment.parentId) : null,
+    String(comment.deviceSignature || "")
   ).run();
 
   return new Response(JSON.stringify({ success: true, comment }), { headers: { "Content-Type": "application/json" } });
