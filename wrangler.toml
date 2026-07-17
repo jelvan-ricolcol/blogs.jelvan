@@ -17,5 +17,5 @@ vars = { ENVIRONMENT = "production", PUBLIC_MEDIA_BASE_URL = "https://media.jelv
 vars = { ENVIRONMENT = "preview", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }
 
 [[kv_namespaces]]
-binding = "TOKEN_KV"
-id = "token_audit_kv"
+binding = "blogs-kv"
+id = "400101c8a96f43df80738eb28673f143"
