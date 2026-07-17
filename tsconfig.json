@@ -1,2 +1,18 @@
 {
-  “compilerOptions”: {“target”: “ES2020”,“module”: “ES2020”,“moduleResolution”: “bundler”,“lib”: [“WebWorker”, “ES2020”],“outDir”: “dist”,“strict”: true,“esModuleInterop”: true,“skipLibCheck”: true,“resolveJsonModule”: true,“types”: [”@cloudflare/workers-types”]},“include”: [“src/**/*”]}
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022", "WebWorker"],
+    "strict": false,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "types": ["vite/client", "@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*", "functions/**/*.ts"],
+  "exclude": ["src/token_audit_do.ts"]
+}

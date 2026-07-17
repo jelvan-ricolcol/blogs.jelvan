@@ -1,100 +1,113 @@
-// functions/api/comments.ts
-// Comment management with moderation queue integration
-
 interface Env {
   DB: D1Database;
-  KV: KVNamespace;
-  MODERATION_QUEUE: Queue;
-  VITE_ADMIN_PASSWORD: string;
+  ADMIN_PASSWORD?: string;
+  VITE_ADMIN_PASSWORD?: string;
 }
 
-// GET /api/comments - Fetch approved comments with pagination
+type CommentInput = {
+  id: string;
+  postId: string;
+  author: string;
+  avatarSeed?: string;
+  text: string;
+  date?: string;
+  isPinned?: boolean;
+  isApproved?: boolean;
+  isReported?: boolean;
+  parentId?: string | null;
+  deviceSignature?: string;
+};
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization"
+};
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+  });
+
+const adminSecret = (env: Env) => env.ADMIN_PASSWORD || env.VITE_ADMIN_PASSWORD || "";
+
+const isAuthorized = (request: Request, env: Env) => {
+  const secret = adminSecret(env);
+  if (!secret) return false;
+  const authHeader = request.headers.get("Authorization")?.trim() || "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : authHeader;
+  return token === secret;
+};
+
+const normalizeComment = (comment: Record<string, any>) => ({
+  ...comment,
+  isPinned: Boolean(comment.isPinned),
+  isApproved: Boolean(comment.isApproved),
+  isReported: Boolean(comment.isReported)
+});
+
+export const onRequestOptions: PagesFunction<Env> = async () =>
+  new Response(null, { headers: CORS_HEADERS });
+
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   try {
     const url = new URL(context.request.url);
     const postId = url.searchParams.get("postId");
-    const page = parseInt(url.searchParams.get("page") || "1");
-    const limit = 20;
+    const includePending = url.searchParams.get("includePending") === "true";
+    const isAdmin = isAuthorized(context.request, context.env);
+
+    const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "20"), 1), 50);
     const offset = (page - 1) * limit;
 
-    const cacheKey = postId
-      ? `comments:${postId}:${page}`
-      : `comments:all:${page}`;
-
-    // Check KV cache first
-    const cached = await context.env.KV.get(cacheKey);
-    if (cached) {
-      return new Response(cached, {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Cache": "HIT"
-        }
-      });
-    }
-
-    let query = "SELECT * FROM comments WHERE isApproved = 1";
-    const bindings: any[] = [];
+    const where: string[] = [];
+    const bindings: Array<string | number> = [];
 
     if (postId) {
-      query += " AND postId = ?";
+      where.push("postId = ?");
       bindings.push(postId);
     }
+    if (!(includePending && isAdmin)) {
+      where.push("isApproved = 1");
+    }
 
-    query += " ORDER BY isPinned DESC, date ASC LIMIT ? OFFSET ?";
+    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const sql = `SELECT * FROM comments ${whereClause} ORDER BY isPinned DESC, date ASC LIMIT ? OFFSET ?`;
+    const countSql = `SELECT COUNT(*) as total FROM comments ${whereClause}`;
+
     bindings.push(limit, offset);
 
-    const { results } = await context.env.DB.prepare(query)
-      .bind(...bindings)
-      .all();
+    const [rows, countRow] = await Promise.all([
+      context.env.DB.prepare(sql).bind(...bindings).all<Record<string, any>>(),
+      context.env.DB.prepare(countSql).bind(...bindings.slice(0, bindings.length - 2)).first<{ total: number }>()
+    ]);
 
-    const comments = results.map((c: any) => ({
-      ...c,
-      isPinned: Boolean(c.isPinned),
-      isApproved: Boolean(c.isApproved),
-      isReported: Boolean(c.isReported)
-    }));
-
-    const response = JSON.stringify({
+    const comments = (rows.results || []).map(normalizeComment);
+    return json({
       comments,
       page,
       limit,
-      total: results.length
-    });
-
-    // Cache for 2 minutes
-    await context.env.KV.put(cacheKey, response, { expirationTtl: 120 });
-
-    return new Response(response, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Cache": "MISS"
-      }
+      total: Number(countRow?.total || 0)
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return json({ error: err.message || "Failed to fetch comments" }, 500);
   }
 };
 
-// POST /api/comments - Submit comment for moderation
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
-    const comment: any = await context.request.json();
-
-    // Validate required fields
-    if (!comment.id || !comment.postId || !comment.author || !comment.text) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+    const comment = (await context.request.json()) as CommentInput;
+    if (!comment?.id || !comment?.postId || !comment?.author || !comment?.text) {
+      return json({ error: "Missing required fields" }, 400);
     }
 
-    // Insert comment with isApproved = 0 (pending moderation)
     await context.env.DB.prepare(`
-      INSERT INTO comments (id, postId, author, avatarSeed, text, date, isPinned, isApproved, isReported, parentId, deviceSignature)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO comments (
+        id, postId, author, avatarSeed, text, date, isPinned, isApproved, isReported, parentId, deviceSignature
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .bind(
         comment.id,
@@ -103,117 +116,65 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         comment.avatarSeed || "",
         comment.text,
         comment.date || new Date().toISOString(),
-        0,
-        0, // Pending approval
-        0,
-        comment.parentId || null,
+        comment.isPinned ? 1 : 0,
+        comment.isApproved ? 1 : 0,
+        comment.isReported ? 1 : 0,
+        comment.parentId ?? null,
         comment.deviceSignature || ""
       )
       .run();
 
-    // Queue for moderation
-    await context.env.MODERATION_QUEUE.send({
-      type: "comment_pending",
-      commentId: comment.id,
-      postId: comment.postId,
-      author: comment.author,
-      text: comment.text,
-      timestamp: new Date().toISOString()
-    });
-
-    // Invalidate cache
-    await context.env.KV.delete(`comments:${comment.postId}:1`);
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: "Comment submitted for moderation",
-        comment: {
-          ...comment,
-          isApproved: false
-        }
-      }),
-      { headers: { "Content-Type": "application/json" } }
-    );
+    return json({ success: true });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return json({ error: err.message || "Failed to submit comment" }, 500);
   }
 };
 
-// PUT /api/comments/:id - Admin approve/reject/pin comment
 export const onRequestPut: PagesFunction<Env> = async (context) => {
   try {
-    const authHeader = context.request.headers.get("Authorization");
-    const adminPassword = context.env.VITE_ADMIN_PASSWORD;
-
-    if (!authHeader || authHeader !== `Bearer ${adminPassword}`) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized access" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+    if (!isAuthorized(context.request, context.env)) {
+      return json({ error: "Unauthorized access" }, 401);
     }
 
-    const commentId = context.params.id as string;
-    const data: any = await context.request.json();
+    const id = new URL(context.request.url).searchParams.get("id");
+    if (!id) {
+      return json({ error: "Missing id query parameter" }, 400);
+    }
 
+    const updates = (await context.request.json()) as Partial<CommentInput>;
     await context.env.DB.prepare(`
       UPDATE comments
-      SET isApproved = ?, isPinned = ?
+      SET isApproved = ?, isPinned = ?, isReported = ?
       WHERE id = ?
     `)
       .bind(
-        data.isApproved ? 1 : 0,
-        data.isPinned ? 1 : 0,
-        commentId
+        updates.isApproved ? 1 : 0,
+        updates.isPinned ? 1 : 0,
+        updates.isReported ? 1 : 0,
+        id
       )
       .run();
 
-    // Invalidate cache
-    await context.env.KV.delete(`comments:all:1`);
-
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { "Content-Type": "application/json" }
-    });
+    return json({ success: true });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return json({ error: err.message || "Failed to update comment" }, 500);
   }
 };
 
-// DELETE /api/comments/:id - Admin delete comment
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
   try {
-    const authHeader = context.request.headers.get("Authorization");
-    const adminPassword = context.env.VITE_ADMIN_PASSWORD;
-
-    if (!authHeader || authHeader !== `Bearer ${adminPassword}`) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized access" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+    if (!isAuthorized(context.request, context.env)) {
+      return json({ error: "Unauthorized access" }, 401);
     }
 
-    const commentId = context.params.id as string;
+    const id = new URL(context.request.url).searchParams.get("id");
+    if (!id) {
+      return json({ error: "Missing id query parameter" }, 400);
+    }
 
-    await context.env.DB.prepare(
-      "DELETE FROM comments WHERE id = ?"
-    ).bind(commentId).run();
-
-    // Invalidate cache
-    await context.env.KV.delete(`comments:all:1`);
-
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { "Content-Type": "application/json" }
-    });
+    await context.env.DB.prepare("DELETE FROM comments WHERE id = ?").bind(id).run();
+    return json({ success: true });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return json({ error: err.message || "Failed to delete comment" }, 500);
   }
 };
