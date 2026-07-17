@@ -11,12 +11,38 @@ database_id = "74607dcf-d430-4786-9d9e-c59a27a68d7f"
 binding = "MEDIA_BUCKET"
 bucket_name = "jelvan-blogs-media"
 
+[[kv_namespaces]]
+binding = "TOKEN_KV"
+id = "400101c8a96f43df80738eb28673f143"
+
 [env.production]
 vars = { ENVIRONMENT = "production", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "d1-blogs"
+database_id = "74607dcf-d430-4786-9d9e-c59a27a68d7f"
+
+[[env.production.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "jelvan-blogs-media"
+
+[[env.production.kv_namespaces]]
+binding = "TOKEN_KV"
+id = "400101c8a96f43df80738eb28673f143"
 
 [env.preview]
 vars = { ENVIRONMENT = "preview", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }
 
-[[kv_namespaces]]
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "d1-blogs"
+database_id = "74607dcf-d430-4786-9d9e-c59a27a68d7f"
+
+[[env.preview.r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "jelvan-blogs-media"
+
+[[env.preview.kv_namespaces]]
 binding = "TOKEN_KV"
 id = "400101c8a96f43df80738eb28673f143"
