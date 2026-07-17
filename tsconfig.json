@@ -1,2 +1,14 @@
 {
-  “compilerOptions”: {“target”: “ES2020”,“module”: “ES2020”,“moduleResolution”: “bundler”,“lib”: [“WebWorker”, “ES2020”],“outDir”: “dist”,“strict”: true,“esModuleInterop”: true,“skipLibCheck”: true,“resolveJsonModule”: true,“types”: [”@cloudflare/workers-types”]},“include”: [“src/**/*”]}
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022", "WebWorker"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["vite/client", "@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*", "functions/**/*.ts"]
+}

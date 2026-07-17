@@ -1,42 +1,17 @@
-# wrangler.toml
 name = "jelvan-blogs"
 pages_build_output_dir = "dist"
 
-# D1 Database Binding
 [[d1_databases]]
 binding = "DB"
 database_name = "d1-blogs"
 database_id = "74607dcf-d430-4786-9d9e-c59a27a68d7f"
 
-# R2 Bucket Binding for Media Storage
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "jelvan-blogs-media"
 
-# KV Namespace for Caching & Analytics
-[[kv_namespaces]]
-binding = "KV"
-id = "your-kv-namespace-id"
-preview_id = "your-kv-preview-namespace-id"
-
-# Queue Consumers for Background Processing
-[[queues.consumers]]
-queue = "moderation-queue"
-max_batch_size = 10
-max_batch_timeout_ms = 30000
-max_retries = 5
-dead_letter_queue = "moderation-queue-dlq"
-
-[[queues.consumers]]
-queue = "media-queue"
-max_batch_size = 10
-max_batch_timeout_ms = 30000
-max_retries = 5
-dead_letter_queue = "media-queue-dlq"
-
-# Environment Configuration
 [env.production]
-vars = { ENVIRONMENT = "production" }
+vars = { ENVIRONMENT = "production", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }
 
 [env.preview]
-vars = { ENVIRONMENT = "preview" }
+vars = { ENVIRONMENT = "preview", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }

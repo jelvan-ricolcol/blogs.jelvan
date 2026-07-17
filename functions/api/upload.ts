@@ -1,197 +1,134 @@
-// functions/api/upload.ts
-// Media upload handler for R2 bucket storage
-
 interface Env {
   MEDIA_BUCKET: R2Bucket;
-  KV: KVNamespace;
-  VITE_ADMIN_PASSWORD: string;
+  ADMIN_PASSWORD?: string;
+  VITE_ADMIN_PASSWORD?: string;
+  PUBLIC_MEDIA_BASE_URL?: string;
 }
 
-// OPTIONS handler for CORS preflight
-export const onRequestOptions: PagesFunction<Env> = async () => {
-  return new Response(null, {
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, GET, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    }
-  });
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization"
 };
 
-// POST handler - Upload file to R2
+const ALLOWED_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/webm",
+  "application/pdf"
+]);
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+  });
+
+const adminSecret = (env: Env) => env.ADMIN_PASSWORD || env.VITE_ADMIN_PASSWORD || "";
+
+const isAuthorized = (request: Request, env: Env) => {
+  const secret = adminSecret(env);
+  if (!secret) return false;
+  const authHeader = request.headers.get("Authorization")?.trim() || "";
+  const token = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : authHeader;
+  return token === secret;
+};
+
+const normalizeFileName = (fileName: string) =>
+  fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
+
+const toPublicUrl = (key: string, env: Env) => {
+  const base = (env.PUBLIC_MEDIA_BASE_URL || "https://media.jelvan.pro").replace(/\/+$/, "");
+  return `${base}/${key}`;
+};
+
+export const onRequestOptions: PagesFunction<Env> = async () =>
+  new Response(null, { headers: CORS_HEADERS });
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
-    const authHeader = context.request.headers.get("Authorization");
-    const adminPassword = context.env.VITE_ADMIN_PASSWORD;
-
-    // Verify admin authentication
-    if (!authHeader || authHeader !== `Bearer ${adminPassword}`) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+    if (!isAuthorized(context.request, context.env)) {
+      return json({ error: "Unauthorized" }, 401);
     }
 
     const formData = await context.request.formData();
-    const file = formData.get("file") as File;
-
-    if (!file) {
-      return new Response(
-        JSON.stringify({ error: "No file provided" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      return json({ error: "No file provided" }, 400);
     }
 
-    // Validate file size (max 50MB)
-    const MAX_SIZE = 50 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
-      return new Response(
-        JSON.stringify({ error: "File too large (max 50MB)" }),
-        { status: 413, headers: { "Content-Type": "application/json" } }
-      );
+    if (file.size > MAX_FILE_SIZE) {
+      return json({ error: "File too large (max 50MB)" }, 413);
+    }
+    if (!ALLOWED_TYPES.has(file.type)) {
+      return json({ error: "File type not allowed" }, 415);
     }
 
-    // Validate file type
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-      "video/mp4",
-      "video/webm",
-      "application/pdf"
-    ];
+    const normalized = normalizeFileName(file.name || "file");
+    const fileKey = `uploads/${Date.now()}-${crypto.randomUUID()}-${normalized}`;
 
-    if (!allowedTypes.includes(file.type)) {
-      return new Response(
-        JSON.stringify({ error: "File type not allowed" }),
-        { status: 415, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Generate unique filename
-    const fileExtension = file.name.split(".").pop()?.toLowerCase();
-    const uniqueKey = `uploads/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExtension}`;
-
-    // Upload to R2 Bucket
-    await context.env.MEDIA_BUCKET.put(uniqueKey, file.stream(), {
+    await context.env.MEDIA_BUCKET.put(fileKey, file.stream(), {
       httpMetadata: {
         contentType: file.type,
         cacheControl: "public, max-age=31536000"
-      },
-      customMetadata: {
-        uploadedBy: "jelvan-admin",
-        uploadedAt: new Date().toISOString()
       }
     });
 
-    // Generate public URL
-    const fileUrl = `https://media.jelvan.pro/${uniqueKey}`;
-
-    // Store metadata in KV for tracking
-    const metadata = {
-      key: uniqueKey,
-      url: fileUrl,
-      fileName: file.name,
-      fileSize: file.size,
-      mimeType: file.type,
-      uploadedAt: new Date().toISOString()
-    };
-
-    await context.env.KV.put(
-      `upload:${uniqueKey}`,
-      JSON.stringify(metadata),
-      { expirationTtl: 86400 * 30 }
-    );
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        url: fileUrl,
-        key: uniqueKey,
-        metadata
-      }),
-      { headers: { "Content-Type": "application/json" } }
-    );
+    return json({
+      success: true,
+      key: fileKey,
+      url: toPublicUrl(fileKey, context.env)
+    });
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return json({ error: err.message || "Failed to upload file" }, 500);
   }
 };
 
-// GET handler - List uploaded files
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   try {
-    const authHeader = context.request.headers.get("Authorization");
-    const adminPassword = context.env.VITE_ADMIN_PASSWORD;
-
-    if (!authHeader || authHeader !== `Bearer ${adminPassword}`) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+    if (!isAuthorized(context.request, context.env)) {
+      return json({ error: "Unauthorized" }, 401);
     }
 
     const list = await context.env.MEDIA_BUCKET.list({ prefix: "uploads/" });
-
     const files = list.objects.map((obj) => ({
       key: obj.key,
       size: obj.size,
       uploadedAt: obj.uploaded,
-      url: `https://media.jelvan.pro/${obj.key}`
+      url: toPublicUrl(obj.key, context.env)
     }));
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        files,
-        total: files.length
-      }),
-      { headers: { "Content-Type": "application/json" } }
-    );
+    return json({ success: true, files, total: files.length });
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return json({ error: err.message || "Failed to list files" }, 500);
   }
 };
 
-// DELETE handler - Delete uploaded file
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
   try {
-    const authHeader = context.request.headers.get("Authorization");
-    const adminPassword = context.env.VITE_ADMIN_PASSWORD;
-
-    if (!authHeader || authHeader !== `Bearer ${adminPassword}`) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+    if (!isAuthorized(context.request, context.env)) {
+      return json({ error: "Unauthorized" }, 401);
     }
 
-    const fileKey = context.params.key as string;
-
-    if (!fileKey || !fileKey.startsWith("uploads/")) {
-      return new Response(
-        JSON.stringify({ error: "Invalid file key" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+    const key = new URL(context.request.url).searchParams.get("key");
+    if (!key || !key.startsWith("uploads/")) {
+      return json({ error: "Invalid key query parameter" }, 400);
     }
 
-    await context.env.MEDIA_BUCKET.delete(fileKey);
-    await context.env.KV.delete(`upload:${fileKey}`);
-
-    return new Response(
-      JSON.stringify({ success: true }),
-      { headers: { "Content-Type": "application/json" } }
-    );
+    await context.env.MEDIA_BUCKET.delete(key);
+    return json({ success: true });
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return json({ error: err.message || "Failed to delete file" }, 500);
   }
 };
