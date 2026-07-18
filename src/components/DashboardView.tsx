@@ -86,6 +86,7 @@ export default function DashboardView({
 }: DashboardViewProps) {
   // Navigation & Authentication
   const [activeTab, setActiveTab] = useState<'analytics' | 'posts' | 'comments' | 'notifications' | 'settings'>('analytics');
+  const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
   const [newPasswordInput, setNewPasswordInput] = useState('');
@@ -450,19 +451,9 @@ export default function DashboardView({
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 shadow-md dark:shadow-2xl relative overflow-hidden"
+          className="w-full max-w-sm"
         >
-          {/* Subtle decoration */}
-          <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/5 dark:bg-amber-500/10 rounded-full blur-2xl" />
-          
-          <div className="text-center space-y-3 mb-8">
-            <h2 className="text-2xl font-bold font-sans text-slate-900 dark:text-white">Private Dashboard</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Authentication required. Enter your admin password to view analytics, moderate comments, and manage posts.
-            </p>
-          </div>
-
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
+          <form onSubmit={handleLoginSubmit} className="space-y-6">
             {isLockedOut ? (
               <div className="p-4 bg-red-500/10 dark:bg-red-950/30 border border-red-500/30 text-red-600 dark:text-red-400 rounded-xl space-y-2.5 text-center">
                 <AlertTriangle className="w-8 h-8 text-red-500 mx-auto animate-pulse" />
@@ -476,19 +467,35 @@ export default function DashboardView({
               </div>
             ) : (
               <>
-                <div>
-                  <label className="block text-xs font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
-                    Dashboard Password
-                  </label>
-                  <input
-                    id="admin-password-input"
-                    type="password"
-                    required
-                    placeholder="Enter password"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full bg-white/40 dark:bg-slate-950/40 backdrop-blur-md border border-slate-200/60 dark:border-slate-800/60 focus:border-amber-500 dark:focus:border-amber-500 focus:bg-white/70 dark:focus:bg-slate-950/70 focus:ring-4 focus:ring-amber-500/15 rounded-xl px-4 py-3 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none transition-all duration-200 text-sm"
-                  />
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                      Email
+                    </label>
+                    <input
+                      id="admin-email-input"
+                      type="email"
+                      required
+                      placeholder="Enter email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      className="w-full bg-transparent border-b border-slate-200 dark:border-slate-800 focus:border-amber-500 dark:focus:border-amber-500 px-0 py-2 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none transition-all duration-200 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                      Password
+                    </label>
+                    <input
+                      id="admin-password-input"
+                      type="password"
+                      required
+                      placeholder="Enter password"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      className="w-full bg-transparent border-b border-slate-200 dark:border-slate-800 focus:border-amber-500 dark:focus:border-amber-500 px-0 py-2 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none transition-all duration-200 text-sm"
+                    />
+                  </div>
                 </div>
 
                 {authError && (
@@ -506,8 +513,29 @@ export default function DashboardView({
                   type="submit"
                   className="w-full bg-slate-950 hover:bg-slate-900 dark:bg-amber-500 dark:hover:bg-amber-600 active:scale-99 text-white dark:text-slate-950 font-bold py-3 rounded-xl transition-all shadow-md dark:shadow-lg dark:shadow-amber-500/10 text-sm flex items-center justify-center gap-1.5"
                 >
-                  Unlock Dashboard
+                  Login
                 </button>
+
+                <div className="flex items-center gap-4 my-6">
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800"></div>
+                  <span className="text-xs font-mono text-slate-500">OR</span>
+                  <div className="flex-1 h-px bg-slate-200 dark:bg-slate-800"></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    className="flex items-center justify-center gap-2 py-2.5 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                  >
+                    Google
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center justify-center gap-2 py-2.5 border border-slate-200 dark:border-slate-800 rounded-xl text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                  >
+                    Passkey
+                  </button>
+                </div>
               </>
             )}
           </form>
