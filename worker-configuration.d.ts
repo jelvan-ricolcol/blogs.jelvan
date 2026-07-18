@@ -14679,3 +14679,4 @@ declare abstract class WorkflowInstance {
         payload: unknown;
     }): Promise<void>;
 }
+RESEND_API_KEY: string;

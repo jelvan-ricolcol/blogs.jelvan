@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { TimelinePost, PostComment, SystemNotification, DashboardStats, PostCategory, VisitorStat } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import AuthForms from './AuthForms';
 
 interface DashboardViewProps {
   posts: TimelinePost[];
@@ -56,7 +57,7 @@ interface DashboardViewProps {
   
   // Auth state
   isAuthenticated: boolean;
-  onLogin: (password: string) => boolean;
+  onLogin: (token: string, user: any) => boolean;
   onLogout: () => void;
 }
 
@@ -251,7 +252,7 @@ export default function DashboardView({
       return;
     }
 
-    const success = onLogin(passwordInput);
+    const success = onLogin(passwordInput, null);
     if (success) {
       setAuthError(false);
       setPasswordInput('');
@@ -462,55 +463,7 @@ export default function DashboardView({
             </p>
           </div>
 
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
-            {isLockedOut ? (
-              <div className="p-4 bg-red-500/10 dark:bg-red-950/30 border border-red-500/30 text-red-600 dark:text-red-400 rounded-xl space-y-2.5 text-center">
-                <AlertTriangle className="w-8 h-8 text-red-500 mx-auto animate-pulse" />
-                <p className="text-xs font-bold font-mono uppercase tracking-wider">Device Locked Out</p>
-                <p className="text-xs leading-relaxed">
-                  Too many incorrect password attempts on this device. Access is suspended for 24 hours.
-                </p>
-                <div className="text-sm font-black font-mono tracking-widest bg-slate-950 text-amber-400 py-1.5 px-3 rounded-lg inline-block shadow-md">
-                  {remainingLockTime}
-                </div>
-              </div>
-            ) : (
-              <>
-                <div>
-                  <label className="block text-xs font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
-                    Dashboard Password
-                  </label>
-                  <input
-                    id="admin-password-input"
-                    type="password"
-                    required
-                    placeholder="Enter password"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full bg-white/40 dark:bg-slate-950/40 backdrop-blur-md border border-slate-200/60 dark:border-slate-800/60 focus:border-amber-500 dark:focus:border-amber-500 focus:bg-white/70 dark:focus:bg-slate-950/70 focus:ring-4 focus:ring-amber-500/15 rounded-xl px-4 py-3 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none transition-all duration-200 text-sm"
-                  />
-                </div>
-
-                {authError && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="p-3 bg-red-500/5 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 rounded-xl text-xs font-mono text-center"
-                  >
-                    Incorrect password. {5 - attempts} {5 - attempts === 1 ? 'attempt' : 'attempts'} remaining.
-                  </motion.div>
-                )}
-
-                <button
-                  id="submit-auth-btn"
-                  type="submit"
-                  className="w-full bg-slate-950 hover:bg-slate-900 dark:bg-amber-500 dark:hover:bg-amber-600 active:scale-99 text-white dark:text-slate-950 font-bold py-3 rounded-xl transition-all shadow-md dark:shadow-lg dark:shadow-amber-500/10 text-sm flex items-center justify-center gap-1.5"
-                >
-                  Unlock Dashboard
-                </button>
-              </>
-            )}
-          </form>
+          <AuthForms onLoginSuccess={onLogin} />
         </motion.div>
       </div>
     );
@@ -1213,6 +1166,52 @@ export default function DashboardView({
               exit={{ opacity: 0 }}
               className="space-y-6"
             >
+              
+              {/* Account Settings */}
+              <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-xl space-y-4">
+                <h3 className="text-sm font-bold font-sans text-slate-900 dark:text-slate-200">Account Security & Notifications</h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Manage your Two-Factor Authentication and email notification preferences.
+                </p>
+
+                <div className="flex flex-col gap-3 pt-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/auth/2fa-setup', { method: 'POST', headers: { 'Authorization': 'Bearer ' + sessionStorage.getItem('token') } });
+                        const data: any = await res.json();
+                        if (data.success) {
+                           alert('Scan this QR code in your Authenticator app using this URI: ' + data.uri);
+                           const code = prompt('Enter the 6-digit code to enable 2FA:');
+                           if (code) {
+                               const verifyRes = await fetch('/api/auth/2fa-enable', { method: 'POST', body: JSON.stringify({ code }), headers: { 'Authorization': 'Bearer ' + sessionStorage.getItem('token'), 'Content-Type': 'application/json' } });
+                               const verifyData: any = await verifyRes.json();
+                               if (verifyData.success) alert('2FA Enabled Successfully!');
+                               else alert('Invalid code.');
+                           }
+                        } else alert('Failed to setup 2FA');
+                      } catch (e) { alert('Error: ' + e); }
+                    }}
+                    className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-750 dark:text-slate-100 rounded-xl text-xs font-semibold font-mono uppercase tracking-wider flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700"
+                  >
+                    Setup Two-Factor Auth (Authenticator App)
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      const enabled = confirm("Enable email notifications for new comments?");
+                      try {
+                        const res = await fetch('/api/auth/settings', { method: 'POST', body: JSON.stringify({ notification_comments: enabled }), headers: { 'Authorization': 'Bearer ' + sessionStorage.getItem('token'), 'Content-Type': 'application/json' } });
+                        if (res.ok) alert('Notification preferences updated!');
+                      } catch (e) { alert('Error: ' + e); }
+                    }}
+                    className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-750 dark:text-slate-100 rounded-xl text-xs font-semibold font-mono uppercase tracking-wider flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700"
+                  >
+                    Manage Notifications
+                  </button>
+                </div>
+              </div>
+
               {/* Backups & Persistence */}
               <div className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-xl space-y-4">
                 <h3 className="text-sm font-bold font-sans text-slate-900 dark:text-slate-200">Local Vault Backup & Recovery</h3>
