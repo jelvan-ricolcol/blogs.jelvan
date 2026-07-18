@@ -377,16 +377,25 @@ To test serverless functions and databases on your laptop, create a `wrangler.to
 # wrangler.toml
 name = "jelvan-blogs"
 pages_build_output_dir = "dist"
+compatibility_date = "2024-04-05"
+
+vars = { ENVIRONMENT = "production", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }
 
 [[d1_databases]]
 binding = "DB"
-database_name = "jelvan-blogs-db"
+database_name = "d1-blogs"
 database_id = "PASTE_YOUR_COPIED_D1_DATABASE_ID_HERE"
 
 [[r2_buckets]]
 binding = "MEDIA_BUCKET"
 bucket_name = "jelvan-blogs-media"
+
+[[kv_namespaces]]
+binding = "TOKEN_KV"
+id = "PASTE_YOUR_COPIED_KV_NAMESPACE_ID_HERE"
 ```
+
+> **Note:** Cloudflare Pages requires bindings in `wrangler.toml` to be either ONLY top-level OR ONLY environment-specific. To avoid deployment failures, we define all bindings at the top level so they apply universally to both preview and production.
 
 #### Step 3: Run the Schema Migration (Cloud Sync)
 Initialize your remote cloud SQL tables on Cloudflare using wrangler in your terminal:
@@ -398,22 +407,18 @@ npm install wrangler --save-dev
 npx wrangler d1 execute jelvan-blogs-db --remote --file=./schema.sql
 ```
 
-#### Step 4: Map Bindings in the Pages Dashboard UI (Crucial for Live Production)
-Wrangler only governs local testing; live production relies on UI Dashboard bindings:
+#### Step 4: Live Production Bindings
+Wrangler now governs both local testing and live production deployments when pushed via GitHub. Because we defined our bindings at the top-level in `wrangler.toml`, Cloudflare Pages will automatically detect and bind your D1 database, R2 bucket, and KV namespace during deployment.
+
+However, you must still add your secret environment variables manually:
 1. Open your **Cloudflare Pages** project panel -> Go to the **Settings** tab.
-2. Select **Functions** from the left-hand navigation list.
-3. Scroll down to **D1 database bindings**:
-   * Click **Add binding**.
-   * Set **Variable name** as `DB`.
-   * Set **D1 database** as your created `jelvan-blogs-db`.
-4. Scroll down further to **R2 bucket bindings**:
-   * Click **Add binding**.
-   * Set **Variable name** as `MEDIA_BUCKET`.
-   * Set **R2 bucket** as your created `jelvan-blogs-media`.
-5. Under **Environment variables (advanced)**, add:
+2. Select **Environment variables** from the left-hand navigation list.
+3. Add the following to both **Production** and **Preview**:
    * **Variable name:** `VITE_ADMIN_PASSWORD`
    * **Value:** `YourMasterSecretPassword`
-6. Click **Save** to lock these integrations.
+   * **Variable name:** `ADMIN_PASSWORD`
+   * **Value:** `YourMasterSecretPassword`
+4. Click **Save** to lock these integrations.
 
 #### Step 5: Run a local development test
 Run the frontend Vite compiler and serverless backend local simulator simultaneously:

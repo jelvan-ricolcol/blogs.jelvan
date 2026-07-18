@@ -36,6 +36,17 @@ const normalizeComment = (comment: Record<string, any>) => {
     extraData = { content: comment.text };
   }
 
+  const isApproved = Boolean(comment.isApproved);
+  const isPinned = Boolean(comment.isPinned);
+  const isReported = Boolean(comment.isReported);
+
+  let status = extraData.status;
+  if (isApproved) {
+    status = 'approved';
+  } else if (status === 'approved') {
+    status = 'hidden';
+  }
+
   return {
     ...comment,
     ...extraData,
@@ -43,9 +54,10 @@ const normalizeComment = (comment: Record<string, any>) => {
     authorAvatar: extraData.authorAvatar || comment.avatarSeed,
     timestamp: extraData.timestamp || comment.date,
     likes: Number(extraData.likes || 0),
-    isPinned: Boolean(comment.isPinned),
-    isApproved: Boolean(comment.isApproved),
-    isReported: Boolean(comment.isReported)
+    isPinned,
+    isApproved,
+    isReported,
+    status
   };
 };
 
