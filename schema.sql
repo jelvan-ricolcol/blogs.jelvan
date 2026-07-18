@@ -39,3 +39,25 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 INSERT OR IGNORE INTO banned_words (word) VALUES ("spam"), ("scam"), ("offensive");
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT, -- null for google auth
+  name TEXT,
+  google_id TEXT UNIQUE,
+  is_verified INTEGER DEFAULT 0,
+  two_factor_secret TEXT,
+  two_factor_enabled INTEGER DEFAULT 0,
+  notification_comments INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS verification_codes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  email TEXT NOT NULL,
+  code TEXT NOT NULL,
+  type TEXT NOT NULL, -- 'signup', 'login', 'forgot_password'
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
