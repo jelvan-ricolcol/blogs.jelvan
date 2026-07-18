@@ -140,7 +140,31 @@ export default function App() {
   const [lightboxMedia, setLightboxMedia] = useState<{ type: 'image' | 'video'; url: string }[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
-  // --- Initialize and Hydrate from LocalStorage ---
+  // --- Initialize and Hydrate from API & LocalStorage ---
+  const fetchTimelineData = async () => {
+    try {
+      const postsRes = await fetch('/api/posts?limit=100');
+      if (postsRes.ok) {
+        const fetchedPosts: any = await postsRes.json();
+        if (fetchedPosts && fetchedPosts.length > 0) {
+          setPosts(fetchedPosts);
+          localStorage.setItem('timeline_posts', JSON.stringify(fetchedPosts));
+        }
+      }
+
+      const commentsRes = await fetch('/api/comments?limit=200');
+      if (commentsRes.ok) {
+        const fetchedComments: any = await commentsRes.json();
+        if (fetchedComments && fetchedComments.comments) {
+          setComments(fetchedComments.comments);
+          localStorage.setItem('timeline_comments', JSON.stringify(fetchedComments.comments));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to sync with cloud:', e);
+    }
+  };
+
   useEffect(() => {
     // Posts
     const storedPosts = localStorage.getItem('timeline_posts');
@@ -148,7 +172,7 @@ export default function App() {
       setPosts(JSON.parse(storedPosts));
     } else {
       setPosts(INITIAL_POSTS);
-      localStorage.setItem('timeline_posts', JSON.stringify(INITIAL_POSTS));
+      // Wait to save until fetch syncs
     }
 
     // Comments
@@ -157,7 +181,6 @@ export default function App() {
       setComments(JSON.parse(storedComments));
     } else {
       setComments(INITIAL_COMMENTS);
-      localStorage.setItem('timeline_comments', JSON.stringify(INITIAL_COMMENTS));
     }
 
     // Notifications
@@ -192,6 +215,10 @@ export default function App() {
     if (sessionAuth === 'true') {
       setIsAdmin(true);
     }
+
+    fetchTimelineData();
+    const intervalId = setInterval(fetchTimelineData, 5000);
+    return () => clearInterval(intervalId);
   }, []);
 
   // Update DOM class and store preference
@@ -249,7 +276,15 @@ export default function App() {
   };
 
   // --- Timeline Actions (Posts) ---
-  const handleLikePost = (postId: string) => {
+  const getAuthHeader = () => {
+    const masterPassword = 
+      (import.meta as any).env?.VITE_ADMIN_PASSWORD || 
+      localStorage.getItem('timeline_admin_password') || 
+      'admin123';
+    return 'Bearer ' + masterPassword;
+  };
+
+  const handleLikePost = async (postId: string) => {
     const updated = posts.map((post) => {
       if (post.id === postId) {
         return { ...post, likes: post.likes + 1 };
@@ -257,9 +292,18 @@ export default function App() {
       return post;
     });
     savePosts(updated);
+    try {
+      await fetch(`/api/posts?id=${postId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'like' })
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleIncrementViews = (postId: string) => {
+  const handleIncrementViews = async (postId: string) => {
     const updated = posts.map((post) => {
       if (post.id === postId) {
         return { ...post, views: post.views + 1 };
@@ -267,24 +311,27 @@ export default function App() {
       return post;
     });
     savePosts(updated);
+    try {
+      await fetch(`/api/posts?id=${postId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'view' })
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleSavePost = (newOrEditedPost: Omit<TimelinePost, 'views' | 'likes' | 'shareCount'>) => {
+  const handleSavePost = async (newOrEditedPost: Omit<TimelinePost, 'views' | 'likes' | 'shareCount'>) => {
     const exists = posts.find((p) => p.id === newOrEditedPost.id);
     let updated: TimelinePost[];
-
+    
+    let fullPost: TimelinePost;
     if (exists) {
-      updated = posts.map((post) => {
-        if (post.id === newOrEditedPost.id) {
-          return {
-            ...post,
-            ...newOrEditedPost,
-          };
-        }
-        return post;
-      });
+      fullPost = { ...exists, ...newOrEditedPost };
+      updated = posts.map((post) => post.id === newOrEditedPost.id ? fullPost : post);
     } else {
-      const fullPost: TimelinePost = {
+      fullPost = {
         ...newOrEditedPost,
         views: 0,
         likes: 0,
@@ -296,15 +343,33 @@ export default function App() {
     savePosts(updated);
     setIsPostModalOpen(false);
     setEditingPost(null);
+
+    try {
+      await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': getAuthHeader() },
+        body: JSON.stringify(fullPost)
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleDeletePost = (postId: string) => {
+  const handleDeletePost = async (postId: string) => {
     const updated = posts.filter((p) => p.id !== postId);
     savePosts(updated);
+    try {
+      await fetch(`/api/posts?id=${postId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': getAuthHeader() }
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // --- Comment Actions & Moderation ---
-  const handleAddComment = (commentData: Omit<PostComment, 'id' | 'timestamp' | 'likes' | 'isReported' | 'status'>) => {
+  const handleAddComment = async (commentData: Omit<PostComment, 'id' | 'timestamp' | 'likes' | 'isReported' | 'status'>) => {
     // Word Filter
     const contentLower = commentData.content.toLowerCase();
     const containsOffensive = offensiveWords.some((word) => contentLower.includes(word));
@@ -336,9 +401,19 @@ export default function App() {
     };
 
     saveNotifications([newNotif, ...notifications]);
+
+    try {
+      await fetch('/api/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newComment)
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleLikeComment = (commentId: string) => {
+  const handleLikeComment = async (commentId: string) => {
     const updated = comments.map((c) => {
       if (c.id === commentId) {
         return { ...c, likes: c.likes + 1 };
@@ -346,9 +421,18 @@ export default function App() {
       return c;
     });
     saveComments(updated);
+    try {
+      await fetch(`/api/comments?id=${commentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'like' })
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleReportComment = (commentId: string) => {
+  const handleReportComment = async (commentId: string) => {
     const comment = comments.find((c) => c.id === commentId);
     if (!comment) return;
 
@@ -373,9 +457,19 @@ export default function App() {
     };
 
     saveNotifications([newNotif, ...notifications]);
+
+    try {
+      await fetch(`/api/comments?id=${commentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'report' })
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleUpdateComment = (commentId: string, updates: Partial<PostComment>) => {
+  const handleUpdateComment = async (commentId: string, updates: Partial<PostComment>) => {
     const updated = comments.map((c) => {
       if (c.id === commentId) {
         return { ...c, ...updates };
@@ -383,11 +477,37 @@ export default function App() {
       return c;
     });
     saveComments(updated);
+
+    try {
+      const payload: any = {};
+      if (updates.status) payload.isApproved = updates.status === 'approved';
+      if (updates.isPinned !== undefined) payload.isPinned = updates.isPinned;
+      if (updates.isReported !== undefined) payload.isReported = updates.isReported;
+
+      if (Object.keys(payload).length > 0) {
+        await fetch(`/api/comments?id=${commentId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': getAuthHeader() },
+          body: JSON.stringify(payload)
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleDeleteComment = (commentId: string) => {
+  const handleDeleteComment = async (commentId: string) => {
     const updated = comments.filter((c) => c.id !== commentId);
     saveComments(updated);
+
+    try {
+      await fetch(`/api/comments?id=${commentId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': getAuthHeader() }
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // --- Notifications ---

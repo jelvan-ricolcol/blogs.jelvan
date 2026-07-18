@@ -4,20 +4,6 @@ interface Env {
   VITE_ADMIN_PASSWORD?: string;
 }
 
-type CommentInput = {
-  id: string;
-  postId: string;
-  author: string;
-  avatarSeed?: string;
-  text: string;
-  date?: string;
-  isPinned?: boolean;
-  isApproved?: boolean;
-  isReported?: boolean;
-  parentId?: string | null;
-  deviceSignature?: string;
-};
-
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -42,12 +28,26 @@ const isAuthorized = (request: Request, env: Env) => {
   return token === secret;
 };
 
-const normalizeComment = (comment: Record<string, any>) => ({
-  ...comment,
-  isPinned: Boolean(comment.isPinned),
-  isApproved: Boolean(comment.isApproved),
-  isReported: Boolean(comment.isReported)
-});
+const normalizeComment = (comment: Record<string, any>) => {
+  let extraData: any = {};
+  try {
+    extraData = JSON.parse(comment.text);
+  } catch {
+    extraData = { content: comment.text };
+  }
+
+  return {
+    ...comment,
+    ...extraData,
+    authorName: extraData.authorName || comment.author,
+    authorAvatar: extraData.authorAvatar || comment.avatarSeed,
+    timestamp: extraData.timestamp || comment.date,
+    likes: Number(extraData.likes || 0),
+    isPinned: Boolean(comment.isPinned),
+    isApproved: Boolean(comment.isApproved),
+    isReported: Boolean(comment.isReported)
+  };
+};
 
 export const onRequestOptions: PagesFunction<Env> = async () =>
   new Response(null, { headers: CORS_HEADERS });
@@ -60,7 +60,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     const isAdmin = isAuthorized(context.request, context.env);
 
     const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
-    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "20"), 1), 50);
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "100"), 1), 200);
     const offset = (page - 1) * limit;
 
     const where: string[] = [];
@@ -100,17 +100,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
-    const comment = (await context.request.json()) as CommentInput;
-    if (!comment?.id || !comment?.postId || !comment?.author || !comment?.text) {
+    const comment = (await context.request.json()) as any;
+    if (!comment?.id || !comment?.postId || (!comment?.author && !comment?.authorName) || (!comment?.text && !comment?.content)) {
       return json({ error: "Missing required fields" }, 400);
     }
 
     const isAdmin = isAuthorized(context.request, context.env);
     
-    // Only admins can set these fields directly during creation
     const isPinned = isAdmin && comment.isPinned ? 1 : 0;
-    const isApproved = isAdmin && comment.isApproved ? 1 : 0;
-    const isReported = comment.isReported ? 1 : 0; // users might report it? usually default 0
+    const isApproved = (isAdmin && comment.isApproved) ? 1 : (comment.status === 'approved' ? 1 : 0);
+    const isReported = comment.isReported ? 1 : 0;
+
+    const textStr = JSON.stringify(comment);
 
     await context.env.DB.prepare(`
       INSERT INTO comments (
@@ -120,10 +121,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       .bind(
         String(comment.id),
         String(comment.postId),
-        String(comment.author),
-        String(comment.avatarSeed || ""),
-        String(comment.text),
-        String(comment.date || new Date().toISOString()),
+        String(comment.authorName || comment.author),
+        String(comment.authorAvatar || comment.avatarSeed || ""),
+        textStr,
+        String(comment.timestamp || comment.date || new Date().toISOString()),
         isPinned,
         isApproved,
         isReported,
@@ -141,28 +142,55 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
   try {
-    if (!isAuthorized(context.request, context.env)) {
+    const id = new URL(context.request.url).searchParams.get("id");
+    if (!id) return json({ error: "Missing id query parameter" }, 400);
+
+    const updates = (await context.request.json()) as any;
+    const isAuth = isAuthorized(context.request, context.env);
+
+    if (updates.action === 'like') {
+      // Likes are stored inside the JSON text field, which is tricky to update via SQL directly.
+      // But we can fetch, parse, update, and save.
+      const commentRow = await context.env.DB.prepare("SELECT text FROM comments WHERE id = ?").bind(String(id)).first<{text: string}>();
+      if (commentRow) {
+        let parsed: any = {};
+        try { parsed = JSON.parse(commentRow.text); } catch { parsed = { content: commentRow.text }; }
+        parsed.likes = (parsed.likes || 0) + 1;
+        await context.env.DB.prepare("UPDATE comments SET text = ? WHERE id = ?").bind(JSON.stringify(parsed), String(id)).run();
+      }
+      return json({ success: true });
+    }
+
+    if (updates.action === 'report') {
+      await context.env.DB.prepare("UPDATE comments SET isReported = 1 WHERE id = ?").bind(String(id)).run();
+      return json({ success: true });
+    }
+
+    if (!isAuth) {
       return json({ error: "Unauthorized access" }, 401);
     }
 
-    const id = new URL(context.request.url).searchParams.get("id");
-    if (!id) {
-      return json({ error: "Missing id query parameter" }, 400);
+    let query = "UPDATE comments SET ";
+    const sets = [];
+    const binds = [];
+    if (updates.isApproved !== undefined) {
+      sets.push("isApproved = ?");
+      binds.push(updates.isApproved ? 1 : 0);
+    }
+    if (updates.isPinned !== undefined) {
+      sets.push("isPinned = ?");
+      binds.push(updates.isPinned ? 1 : 0);
+    }
+    if (updates.isReported !== undefined) {
+      sets.push("isReported = ?");
+      binds.push(updates.isReported ? 1 : 0);
     }
 
-    const updates = (await context.request.json()) as Partial<CommentInput>;
-    await context.env.DB.prepare(`
-      UPDATE comments
-      SET isApproved = ?, isPinned = ?, isReported = ?
-      WHERE id = ?
-    `)
-      .bind(
-        updates.isApproved ? 1 : 0,
-        updates.isPinned ? 1 : 0,
-        updates.isReported ? 1 : 0,
-        String(id)
-      )
-      .run();
+    if (sets.length > 0) {
+      query += sets.join(", ") + " WHERE id = ?";
+      binds.push(String(id));
+      await context.env.DB.prepare(query).bind(...binds).run();
+    }
 
     return json({ success: true });
   } catch (err: any) {
