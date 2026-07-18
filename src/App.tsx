@@ -256,17 +256,11 @@ export default function App() {
   };
 
   // --- Admin Authentication triggers ---
-  const handleLogin = (password: string): boolean => {
-    const masterPassword = 
-      (import.meta as any).env?.VITE_ADMIN_PASSWORD || 
-      localStorage.getItem('timeline_admin_password') || 
-      'admin123';
-    if (password === masterPassword) {
-      setIsAdmin(true);
-      sessionStorage.setItem('timeline_admin_authenticated', 'true');
-      return true;
-    }
-    return false;
+  const handleLogin = (token: string, user: any): boolean => {
+    setIsAdmin(true);
+    sessionStorage.setItem('timeline_admin_authenticated', 'true');
+    sessionStorage.setItem('token', token);
+    return true;
   };
 
   const handleLogout = () => {
