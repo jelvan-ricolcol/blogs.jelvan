@@ -2,7 +2,9 @@ name = "jelvan-blogs"
 pages_build_output_dir = "dist"
 compatibility_date = "2024-04-05"
 
-vars = { ENVIRONMENT = "production", PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro" }
+[vars]
+ENVIRONMENT = "production"
+PUBLIC_MEDIA_BASE_URL = "https://media.jelvan.pro"
 
 [[d1_databases]]
 binding = "DB"
