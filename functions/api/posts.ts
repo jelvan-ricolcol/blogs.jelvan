@@ -4,22 +4,9 @@ interface Env {
   VITE_ADMIN_PASSWORD?: string;
 }
 
-type PostInput = {
-  id: string;
-  title: string;
-  category: string;
-  content: string;
-  date: string;
-  media?: unknown;
-  likes?: number;
-  views?: number;
-  isPinned?: boolean;
-  deviceSignature?: string;
-};
-
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization"
 };
 
@@ -43,19 +30,29 @@ const isAuthorized = (request: Request, env: Env) => {
   return token === secret;
 };
 
-const normalizePost = (post: Record<string, any>) => ({
-  ...post,
-  likes: Number(post.likes || 0),
-  views: Number(post.views || 0),
-  isPinned: Boolean(post.isPinned),
-  media: (() => {
-    try {
-      return post.media ? JSON.parse(post.media) : [];
-    } catch {
-      return [];
-    }
-  })()
-});
+const normalizePost = (post: Record<string, any>) => {
+  let extraData: any = {};
+  try {
+    extraData = JSON.parse(post.content);
+  } catch {
+    extraData = { description: post.content };
+  }
+  
+  const mediaStr = post.media || extraData.media;
+  let mediaArr = [];
+  try {
+    mediaArr = typeof mediaStr === 'string' ? JSON.parse(mediaStr) : (mediaStr || []);
+  } catch {}
+
+  return {
+    ...post,
+    ...extraData,
+    likes: Number(post.likes || 0),
+    views: Number(post.views || 0),
+    isPinned: Boolean(post.isPinned),
+    media: mediaArr
+  };
+};
 
 export const onRequestOptions: PagesFunction<Env> = async () =>
   new Response(null, { headers: CORS_HEADERS });
@@ -96,10 +93,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return json({ error: "Unauthorized access" }, 401);
     }
 
-    const data = (await context.request.json()) as PostInput;
-    if (!data?.id || !data?.title || !data?.category || !data?.content || !data?.date) {
+    const data = (await context.request.json()) as any;
+    if (!data?.id || !data?.title || !data?.category || !data?.date) {
       return json({ error: "Missing required fields" }, 400);
     }
+
+    const contentStr = JSON.stringify(data);
 
     await context.env.DB.prepare(`
       INSERT OR REPLACE INTO posts (
@@ -110,7 +109,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         String(data.id),
         String(data.title),
         String(data.category),
-        String(data.content),
+        contentStr,
         String(data.date),
         JSON.stringify(Array.isArray(data.media) ? data.media : []),
         Number(data.likes || 0),
@@ -124,6 +123,42 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   } catch (err: any) {
     console.error("Error saving post:", err);
     return json({ error: "Failed to save post" }, 500);
+  }
+};
+
+export const onRequestPut: PagesFunction<Env> = async (context) => {
+  try {
+    const id = new URL(context.request.url).searchParams.get("id");
+    if (!id) return json({ error: "Missing id query parameter" }, 400);
+
+    const updates = (await context.request.json()) as any;
+    const isAuth = isAuthorized(context.request, context.env);
+
+    // Allow unauthenticated likes and views updates
+    if (updates.action === 'like') {
+      await context.env.DB.prepare("UPDATE posts SET likes = likes + 1 WHERE id = ?").bind(String(id)).run();
+      return json({ success: true });
+    }
+    
+    if (updates.action === 'view') {
+      await context.env.DB.prepare("UPDATE posts SET views = views + 1 WHERE id = ?").bind(String(id)).run();
+      return json({ success: true });
+    }
+
+    // Require auth for other updates
+    if (!isAuth) {
+      return json({ error: "Unauthorized access" }, 401);
+    }
+
+    // Since we don't have a partial update for JSON in sqlite easily, we just update isPinned
+    if (updates.isPinned !== undefined) {
+       await context.env.DB.prepare("UPDATE posts SET isPinned = ? WHERE id = ?").bind(updates.isPinned ? 1 : 0, String(id)).run();
+    }
+
+    return json({ success: true });
+  } catch (err: any) {
+    console.error("Error updating post:", err);
+    return json({ error: "Failed to update post" }, 500);
   }
 };
 
